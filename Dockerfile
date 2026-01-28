@@ -28,7 +28,7 @@ RUN python3 -m pip install piexif opencv-python-headless
 RUN python3 -m pip install git+https://github.com/facebookresearch/segment-anything.git
 
 # DWpose deps
-RUN python3 -m pip install onnxruntime-gpu
+RUN python3 -m pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 
 # FileBrowser
 RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
