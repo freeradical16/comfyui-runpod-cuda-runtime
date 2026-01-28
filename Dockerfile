@@ -37,7 +37,7 @@ RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git
 RUN git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git
 
 # IP-Adapter
-RUN git clone https://github.com/comfyorg/comfyui-ipadapter.git
+RUN git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git
 
 # Ultimate SD Upscale
 RUN git clone https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git
