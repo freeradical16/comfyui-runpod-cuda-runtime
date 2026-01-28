@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+.FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
@@ -20,6 +20,12 @@ RUN python3 -m pip install \
 # JupyterLab + notebook deps
 RUN python3 -m pip install jupyterlab
 RUN python3 -m pip install -U requests tqdm ipywidgets jupyterlab_widgets
+
+# Impact Pack deps
+RUN python3 -m pip install piexif
+
+# DWpose deps
+RUN python3 -m pip install onnxruntime-gpu
 
 # FileBrowser
 RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
