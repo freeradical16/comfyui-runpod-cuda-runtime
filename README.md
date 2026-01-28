@@ -1,4 +1,4 @@
-# # ComfyUI RunPod Image (CUDA runtime) + JupyterLab
+# ComfyUI RunPod Image (CUDA runtime) + JupyterLab
 
 This repo builds a Docker image for RunPod with:
 - ComfyUI on port **8188**
