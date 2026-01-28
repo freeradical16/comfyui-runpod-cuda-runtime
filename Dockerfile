@@ -60,6 +60,7 @@ done'
 # ---- Notebook baked into /opt (not masked by /workspace) ----
 RUN mkdir -p /opt/notebooks
 COPY notebooks/model_downloader.ipynb /opt/notebooks/model_downloader.ipynb
+COPY notebooks/model_downloader_app.py /opt/notebooks/model_downloader_app.py
 
 # Supervisor + start
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
