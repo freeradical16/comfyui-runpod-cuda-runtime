@@ -20,6 +20,9 @@ RUN python3 -m pip install \
 # JupyterLab (file browser + terminal)
 RUN python3 -m pip install jupyterlab
 
+# Notebook deps 
+RUN python3 -m pip install -U requests tqdm ipywidgets jupyterlab_widgets
+
 # ComfyUI
 WORKDIR /workspace
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git
