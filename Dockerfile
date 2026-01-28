@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN python3 -m pip install --upgrade pip
 
-# PyTorch (cu121 wheels are the common “easy mode” and work fine on A5000/A40)
+# PyTorch (cu121 wheels are a common “easy mode”; works fine on A5000/A40)
 RUN python3 -m pip install \
     torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
@@ -64,9 +64,10 @@ RUN bash -lc 'for d in custom_nodes/*; do \
   fi; \
 done'
 
-# Bake notebook into the image
-RUN mkdir -p /workspace/notebooks
-COPY notebooks/model_downloader.ipynb /workspace/notebooks/model_downloader.ipynb
+# ---- Notebook fix ----
+# Bake notebook somewhere NOT masked by a /workspace volume mount.
+RUN mkdir -p /opt/notebooks
+COPY notebooks/model_downloader.ipynb /opt/notebooks/model_downloader.ipynb
 
 # Supervisor config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -75,43 +76,10 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Ports: ComfyUI + JupyterLab + FileBrowser
+# Ports
 EXPOSE 8188 8888 8080
 
 # Proper PID1 signal handling
 ENTRYPOINT ["dumb-init", "--"]
-
-CMD ["/start.sh"]RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git
-
-# ControlNet preprocessors (DWpose, depth, etc.)
-RUN git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git
-
-# IP-Adapter
-RUN git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git
-
-# Ultimate SD Upscale
-RUN git clone https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git
-
-# Impact Pack (FaceDetailer, detectors, etc.)
-RUN git clone https://github.com/ltdrdata/ComfyUI-Impact-Pack.git
-
-# ---- Install custom node requirements (best-effort) ----
-WORKDIR /workspace/ComfyUI
-RUN bash -lc 'for d in custom_nodes/*; do \
-  if [ -f "$d/requirements.txt" ]; then \
-    echo "Installing requirements for $d"; \
-    python3 -m pip install -r "$d/requirements.txt" || true; \
-  fi; \
-done'
-
-# Bake notebook into the image
-RUN mkdir -p /workspace/notebooks
-COPY notebooks/model_downloader.ipynb /workspace/notebooks/model_downloader.ipynb
-
-# Ports: ComfyUI + JupyterLab
-EXPOSE 8188 8888
-
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
 
 CMD ["/start.sh"]
