@@ -57,6 +57,10 @@ RUN bash -lc 'for d in custom_nodes/*; do \
   fi; \
 done'
 
+# Bake notebook into the image
+RUN mkdir -p /workspace/notebooks
+COPY notebooks/model_downloader.ipynb /workspace/notebooks/model_downloader.ipynb
+
 # Ports: ComfyUI + JupyterLab
 EXPOSE 8188 8888
 
