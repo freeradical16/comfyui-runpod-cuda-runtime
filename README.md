@@ -1,35 +1,43 @@
-# ComfyUI RunPod Image (CUDA runtime) + JupyterLab
+# ComfyUI RunPod Image (CUDA runtime) + JupyterLab + FileBrowser
 
 This repo builds a Docker image for RunPod with:
 - ComfyUI on port **8188**
-- JupyterLab (file browser + terminal) on port **8888**
+- JupyterLab on port **8888**
+- FileBrowser on port **8080**
 - A baked-in notebook: **Model Downloader (URLs only)**
+
+All services are managed by **supervisord** (single container, multiple services).
 
 ## What’s inside
 - Base: `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`
 - PyTorch installed (CUDA wheels)
 - ComfyUI installed
-- Custom nodes baked in:
-  - ComfyUI-Manager
-  - comfyui_controlnet_aux
-  - comfyorg/comfyui-ipadapter
-  - ComfyUI_UltimateSDUpscale
-  - ComfyUI-Impact-Pack
+
+Custom nodes baked in:
+- ComfyUI-Manager
+- comfyui_controlnet_aux
+- ComfyUI_IPAdapter_plus
+- ComfyUI_UltimateSDUpscale
+- ComfyUI-Impact-Pack
+- rgthree-comfy
 
 Notebook baked into the image:
 - `/workspace/notebooks/model_downloader.ipynb`
 
 ## Ports
+Expose these in your RunPod template/pod:
 - **8188** = ComfyUI
 - **8888** = JupyterLab
-
-Expose both ports in your RunPod template/pod.
+- **8080** = FileBrowser
 
 ## Environment variables
 Recommended:
 - `JUPYTER_TOKEN` = token for JupyterLab access (leave blank only if you accept it being open)
 - `CIVITAI_TOKEN` = CivitAI API token (for downloads requiring auth)
 - `HF_TOKEN` = Hugging Face token (only needed for gated/private downloads)
+
+Optional:
+- `FILEBROWSER_NOAUTH=1` = run FileBrowser without login
 
 ## Where to put models
 Use a RunPod **volume** for models + outputs.
