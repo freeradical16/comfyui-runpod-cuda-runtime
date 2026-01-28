@@ -22,7 +22,10 @@ RUN python3 -m pip install jupyterlab
 RUN python3 -m pip install -U requests tqdm ipywidgets jupyterlab_widgets
 
 # Impact Pack deps
-RUN python3 -m pip install piexif
+RUN python3 -m pip install piexif opencv-python-headless
+
+# Segment Anything (Impact Pack uses this)
+RUN python3 -m pip install git+https://github.com/facebookresearch/segment-anything.git
 
 # DWpose deps
 RUN python3 -m pip install onnxruntime-gpu
