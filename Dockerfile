@@ -30,9 +30,14 @@ RUN python3 -m pip install git+https://github.com/facebookresearch/segment-anyth
 # DWpose deps
 RUN python3 -m pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 
-# FileBrowser
-RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
-
+# FileBrowser (pinned binary install; avoids flaky get.sh in CI)
+ARG FILEBROWSER_VERSION=2.27.0
+RUN curl -fL "https://github.com/filebrowser/filebrowser/releases/download/v${FILEBROWSER_VERSION}/linux-amd64-filebrowser.tar.gz" \
+    -o /tmp/filebrowser.tar.gz \
+ && tar -xzf /tmp/filebrowser.tar.gz -C /usr/local/bin filebrowser \
+ && chmod +x /usr/local/bin/filebrowser \
+ && rm -f /tmp/filebrowser.tar.gz
+ 
 # ---- ComfyUI baked into /opt so it isn't hidden by /workspace volume mounts ----
 WORKDIR /opt
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git
