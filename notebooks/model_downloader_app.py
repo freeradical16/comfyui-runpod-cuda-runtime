@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import unquote
 
 import requests
-from tqdm.auto import tqdm
 
 import ipywidgets as w
 from IPython.display import display, clear_output
@@ -48,7 +48,6 @@ for p in folders.values():
 def _safe_filename(name: str) -> str:
     # Avoid path traversal + weird slashes
     name = name.replace("\\", "_").replace("/", "_").strip()
-    # Some URLs produce absurd names; don't “fix” that here beyond path safety.
     return name or "download.bin"
 
 
@@ -62,17 +61,14 @@ def _filename_from_cd(cd: str | None) -> str | None:
     if not cd:
         return None
 
-    # filename*=UTF-8''something
     m = re.search(r"filename\*\s*=\s*UTF-8''([^;]+)", cd, flags=re.IGNORECASE)
     if m:
         return Path(unquote(m.group(1).strip().strip('"'))).name
 
-    # filename="something"
     m = re.search(r'filename\s*=\s*"([^"]+)"', cd, flags=re.IGNORECASE)
     if m:
         return Path(m.group(1)).name
 
-    # filename=something
     m = re.search(r"filename\s*=\s*([^;]+)", cd, flags=re.IGNORECASE)
     if m:
         return Path(m.group(1).strip().strip('"')).name
@@ -89,29 +85,45 @@ def _headers_for_url(url: str) -> dict[str, str]:
 
     hf = os.environ.get("HF_TOKEN", "").strip()
     if ("huggingface.co" in url or "hf.co" in url) and hf:
-        # This is safe to send; ignored by public endpoints, needed by gated models.
         headers["Authorization"] = f"Bearer {hf}"
 
     return headers
 
 
+def _fmt_bytes(n: int | None) -> str:
+    if n is None:
+        return "?"
+    n = int(n)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    f = float(n)
+    for u in units:
+        if f < 1024.0 or u == units[-1]:
+            return f"{f:.1f} {u}" if u != "B" else f"{int(f)} B"
+        f /= 1024.0
+    return f"{f:.1f} TB"
+
+
+# ----------------------------
+# Downloader (with optional UI callback)
+# ----------------------------
 def download(
     url: str,
     folder_key: str,
     filename: str | None = None,
     overwrite: bool = False,
+    progress_cb=None,  # callable(downloaded:int, total:int|None, filename:str, phase:str)
 ) -> Path:
     """
     Download URL into ComfyUI/models/<folder_key>.
     - Writes to <file>.part then renames
     - Supports resume if server supports Range
+    - If progress_cb provided, updates via callback (stable in Jupyter widgets)
     """
     if folder_key not in folders:
         raise ValueError(f"folder_key must be one of: {list(folders.keys())}")
 
     dest_dir = folders[folder_key]
     dest_dir.mkdir(parents=True, exist_ok=True)
-
     headers = _headers_for_url(url)
 
     # Probe request: resolve final URL, sniff filename and size
@@ -122,7 +134,6 @@ def download(
             filename = _filename_from_cd(r.headers.get("content-disposition"))
 
         if not filename:
-            # Fallback: parse from URL
             filename = url.split("?")[0].rstrip("/").split("/")[-1] or "download.bin"
 
         filename = _safe_filename(filename)
@@ -130,6 +141,8 @@ def download(
         tmp = dest.with_suffix(dest.suffix + ".part")
 
         if dest.exists() and not overwrite:
+            if progress_cb:
+                progress_cb(dest.stat().st_size, dest.stat().st_size, filename, "skipped")
             return dest
 
         if dest.exists() and overwrite:
@@ -142,10 +155,12 @@ def download(
     # Resume if partial exists
     req_headers = dict(headers)
     mode = "wb"
-
     if existing > 0:
         req_headers["Range"] = f"bytes={existing}-"
         mode = "ab"
+
+    if progress_cb:
+        progress_cb(existing, total, filename, "start")
 
     with requests.get(url, headers=req_headers, stream=True, allow_redirects=True, timeout=60) as r2:
         # If server doesn't support Range, it might return 200 even though we asked for Range.
@@ -153,23 +168,31 @@ def download(
         if existing > 0 and r2.status_code == 200:
             existing = 0
             mode = "wb"
+            if progress_cb:
+                progress_cb(existing, total, filename, "restart")
 
         r2.raise_for_status()
 
-        with open(tmp, mode) as f, tqdm(
-            total=total,
-            initial=existing,
-            unit="B",
-            unit_scale=True,
-            desc=filename,
-        ) as pbar:
+        wrote = existing
+        last_ui = 0.0
+
+        with open(tmp, mode) as f:
             for chunk in r2.iter_content(chunk_size=1024 * 1024):
                 if not chunk:
                     continue
                 f.write(chunk)
-                pbar.update(len(chunk))
+                wrote += len(chunk)
+
+                if progress_cb:
+                    now = time.time()
+                    # throttle UI updates a bit (smoother / less spammy)
+                    if (now - last_ui) >= 0.15:
+                        progress_cb(wrote, total, filename, "downloading")
+                        last_ui = now
 
     tmp.rename(dest)
+    if progress_cb:
+        progress_cb(dest.stat().st_size, dest.stat().st_size, filename, "done")
     return dest
 
 
@@ -188,8 +211,7 @@ def _parse_batch_lines(text: str) -> list[tuple[str | None, str]]:
         s = line.strip()
         if not s or s.startswith("#"):
             continue
-
-        parts = s.split(None, 1)  # first whitespace
+        parts = s.split(None, 1)
         if len(parts) == 2 and parts[0] in folders:
             items.append((parts[0], parts[1].strip()))
         else:
@@ -198,20 +220,23 @@ def _parse_batch_lines(text: str) -> list[tuple[str | None, str]]:
 
 
 # ----------------------------
-# UI
+# UI (persistent widgets; no “progress disappears”)
 # ----------------------------
 setup_out = w.Output()
-single_out = w.Output()
-batch_out = w.Output()
 
-# Single controls
+# ---- Single widgets
 single_folder_dd = w.Dropdown(options=list(folders.keys()), value="checkpoints", description="Folder:")
 single_overwrite_cb = w.Checkbox(value=False, description="Overwrite")
 url_tb = w.Text(value="", placeholder="Paste URL…", description="URL:", layout=w.Layout(width="900px"))
 name_tb = w.Text(value="", placeholder="Optional filename override", description="Name:", layout=w.Layout(width="900px"))
 btn_single = w.Button(description="Download (Single)", button_style="success")
 
-# Batch controls (independent)
+single_status = w.Label(value="Idle")
+single_pbar = w.IntProgress(value=0, min=0, max=100, description="0%")
+single_bytes = w.Label(value="")
+single_log = w.Textarea(value="", layout=w.Layout(width="900px", height="160px"))
+
+# ---- Batch widgets
 batch_folder_dd = w.Dropdown(options=list(folders.keys()), value="checkpoints", description="Default:")
 batch_overwrite_cb = w.Checkbox(value=False, description="Overwrite")
 batch_tb = w.Textarea(
@@ -229,6 +254,11 @@ batch_tb = w.Textarea(
 )
 btn_batch = w.Button(description="Download (Batch)", button_style="success")
 
+batch_status = w.Label(value="Idle")
+batch_pbar = w.IntProgress(value=0, min=0, max=100, description="0%")
+batch_bytes = w.Label(value="")
+batch_log = w.Textarea(value="", layout=w.Layout(width="900px", height="200px"))
+
 btn_setup = w.Button(description="Run Setup Check", button_style="info")
 
 
@@ -244,47 +274,144 @@ def _setup(_):
             print(f"  {k:16s} -> {p}")
 
 
-def _do_single(_):
-    with single_out:
-        clear_output(wait=True)
-        url = url_tb.value.strip()
-        if not url:
-            print("Paste a URL first.")
+def _make_progress_cb(status_lbl: w.Label, pbar: w.IntProgress, bytes_lbl: w.Label, log: w.Textarea):
+    last_pct = {"v": -1}
+
+    def cb(downloaded: int, total: int | None, filename: str, phase: str):
+        if phase == "skipped":
+            status_lbl.value = f"Skipped (already exists): {filename}"
+            pbar.max = 100
+            pbar.value = 100
+            pbar.description = "100%"
+            bytes_lbl.value = ""
+            log.value += f"[SKIP] {filename}\n"
             return
 
+        if phase in ("start", "restart"):
+            status_lbl.value = f"Downloading: {filename}"
+            last_pct["v"] = -1
+            if total and total > 0:
+                pbar.max = int(total)
+                pbar.value = int(downloaded)
+                pct = int((downloaded / total) * 100)
+                pbar.description = f"{pct}%"
+                bytes_lbl.value = f"{_fmt_bytes(downloaded)} / {_fmt_bytes(total)}"
+            else:
+                pbar.max = 100
+                pbar.value = 0
+                pbar.description = "..."
+                bytes_lbl.value = f"{_fmt_bytes(downloaded)} / ?"
+            if phase == "restart":
+                log.value += "[INFO] Server ignored Range; restarting download.\n"
+            return
+
+        if phase == "downloading":
+            if total and total > 0:
+                pbar.max = int(total)
+                pbar.value = int(min(downloaded, total))
+                pct = int((downloaded / total) * 100)
+                if pct != last_pct["v"]:
+                    pbar.description = f"{pct}%"
+                    last_pct["v"] = pct
+                bytes_lbl.value = f"{_fmt_bytes(downloaded)} / {_fmt_bytes(total)}"
+            else:
+                # unknown total: show activity
+                pbar.max = 100
+                pbar.value = (pbar.value + 1) % 100
+                pbar.description = "..."
+                bytes_lbl.value = f"{_fmt_bytes(downloaded)} / ?"
+            return
+
+        if phase == "done":
+            status_lbl.value = f"Saved: {filename}"
+            pbar.max = 100
+            pbar.value = 100
+            pbar.description = "100%"
+            bytes_lbl.value = ""
+            log.value += f"[OK] {filename}\n"
+            return
+
+    return cb
+
+
+def _do_single(_):
+    url = url_tb.value.strip()
+    if not url:
+        single_status.value = "Paste a URL first."
+        return
+
+    btn_single.disabled = True
+    single_log.value = ""
+    single_pbar.max = 100
+    single_pbar.value = 0
+    single_pbar.description = "0%"
+    single_bytes.value = ""
+    single_status.value = "Starting…"
+
+    cb = _make_progress_cb(single_status, single_pbar, single_bytes, single_log)
+
+    try:
         out_path = download(
             url=url,
             folder_key=single_folder_dd.value,
             filename=(name_tb.value.strip() or None),
             overwrite=single_overwrite_cb.value,
+            progress_cb=cb,
         )
-        print("Saved:", out_path)
+        single_log.value += f"Saved path: {out_path}\n"
+    except Exception as e:
+        single_status.value = "FAILED"
+        single_log.value += f"[FAILED] {e}\n"
+    finally:
+        btn_single.disabled = False
 
 
 def _do_batch(_):
-    with batch_out:
-        clear_output(wait=True)
+    parsed = _parse_batch_lines(batch_tb.value)
+    if not parsed:
+        batch_status.value = "Paste at least one URL."
+        return
 
-        parsed = _parse_batch_lines(batch_tb.value)
-        if not parsed:
-            print("Paste at least one URL.")
-            return
+    btn_batch.disabled = True
+    batch_log.value = ""
+    batch_pbar.max = 100
+    batch_pbar.value = 0
+    batch_pbar.description = "0%"
+    batch_bytes.value = ""
+    batch_status.value = "Starting…"
 
-        default_folder = batch_folder_dd.value
-        ow = batch_overwrite_cb.value
+    ow = batch_overwrite_cb.value
+    default_folder = batch_folder_dd.value
+    fails = 0
 
-        fails = 0
+    try:
         for i, (fk, url) in enumerate(parsed, 1):
             folder_key = fk or default_folder
+            batch_status.value = f"[{i}/{len(parsed)}] {folder_key}"
+            batch_log.value += f"[{i}/{len(parsed)}] ({folder_key}) {url}\n"
+
+            # per-file progress for batch
+            cb = _make_progress_cb(batch_status, batch_pbar, batch_bytes, batch_log)
+
             try:
-                print(f"[{i}/{len(parsed)}] ({folder_key}) {url}")
-                out_path = download(url=url, folder_key=folder_key, overwrite=ow)
-                print("  Saved:", out_path)
+                out_path = download(
+                    url=url,
+                    folder_key=folder_key,
+                    overwrite=ow,
+                    progress_cb=cb,
+                )
+                batch_log.value += f"Saved path: {out_path}\n"
             except Exception as e:
                 fails += 1
-                print("  FAILED:", e)
+                batch_log.value += f"[FAILED] {e}\n"
 
-        print("\nDone. Failures:", fails)
+        batch_status.value = f"Done. Failures: {fails}"
+        batch_pbar.max = 100
+        batch_pbar.value = 100
+        batch_pbar.description = "100%"
+        batch_bytes.value = ""
+    finally:
+        btn_batch.disabled = False
 
 
 btn_setup.on_click(_setup)
@@ -293,9 +420,20 @@ btn_batch.on_click(_do_batch)
 
 tabs = w.Tab(children=[
     w.VBox([w.HBox([btn_setup]), setup_out]),
-    w.VBox([w.HBox([single_folder_dd, single_overwrite_cb]), url_tb, name_tb, btn_single, single_out]),
-    w.VBox([w.HBox([batch_folder_dd, batch_overwrite_cb]), batch_tb, btn_batch, batch_out]),
+    w.VBox([
+        w.HBox([single_folder_dd, single_overwrite_cb]),
+        url_tb, name_tb, btn_single,
+        single_status, single_pbar, single_bytes,
+        single_log
+    ]),
+    w.VBox([
+        w.HBox([batch_folder_dd, batch_overwrite_cb]),
+        batch_tb, btn_batch,
+        batch_status, batch_pbar, batch_bytes,
+        batch_log
+    ]),
 ])
+
 tabs.set_title(0, "Setup")
 tabs.set_title(1, "Single")
 tabs.set_title(2, "Batch")
