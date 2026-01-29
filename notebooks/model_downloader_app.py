@@ -382,34 +382,67 @@ def _do_batch(_):
 
     ow = batch_overwrite_cb.value
     default_folder = batch_folder_dd.value
+
     fails = 0
+    fail_list = []
+
+    # retry settings (tweak as you like)
+    MAX_RETRIES = 2
+    RETRY_SLEEP_SEC = 2
 
     try:
+        total_items = len(parsed)
+
         for i, (fk, url) in enumerate(parsed, 1):
             folder_key = fk or default_folder
-            batch_status.value = f"[{i}/{len(parsed)}] {folder_key}"
-            batch_log.value += f"[{i}/{len(parsed)}] ({folder_key}) {url}\n"
+            url = url.strip()
 
-            # per-file progress for batch
+            batch_status.value = f"[{i}/{total_items}] ({folder_key})"
+            batch_log.value += f"[{i}/{total_items}] ({folder_key}) {url}\n"
+
             cb = _make_progress_cb(batch_status, batch_pbar, batch_bytes, batch_log)
 
-            try:
-                out_path = download(
-                    url=url,
-                    folder_key=folder_key,
-                    overwrite=ow,
-                    progress_cb=cb,
-                )
-                batch_log.value += f"Saved path: {out_path}\n"
-            except Exception as e:
+            success = False
+            last_err = None
+
+            for attempt in range(1, MAX_RETRIES + 2):  # e.g. 1..3 if MAX_RETRIES=2
+                try:
+                    if attempt > 1:
+                        batch_log.value += f"  retry {attempt-1}/{MAX_RETRIES}…\n"
+
+                    out_path = download(
+                        url=url,
+                        folder_key=folder_key,
+                        overwrite=ow,
+                        progress_cb=cb,
+                    )
+                    batch_log.value += f"Saved path: {out_path}\n"
+                    success = True
+                    break
+
+                except Exception as e:
+                    last_err = e
+                    # log and retry
+                    batch_log.value += f"  [FAILED attempt {attempt}] {e}\n"
+                    if attempt <= MAX_RETRIES:
+                        time.sleep(RETRY_SLEEP_SEC)
+
+            if not success:
                 fails += 1
-                batch_log.value += f"[FAILED] {e}\n"
+                fail_list.append((folder_key, url, str(last_err)))
+                batch_log.value += f"[GIVE UP] {url}\n\n"
 
         batch_status.value = f"Done. Failures: {fails}"
         batch_pbar.max = 100
         batch_pbar.value = 100
         batch_pbar.description = "100%"
         batch_bytes.value = ""
+
+        if fails:
+            batch_log.value += "\n=== FAILURES SUMMARY ===\n"
+            for (fk, u, err) in fail_list:
+                batch_log.value += f"- ({fk}) {u}\n  -> {err}\n"
+
     finally:
         btn_batch.disabled = False
 
