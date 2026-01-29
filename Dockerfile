@@ -19,7 +19,7 @@ RUN python3 -m pip install \
 
 # JupyterLab + notebook deps
 RUN python3 -m pip install jupyterlab
-RUN python3 -m pip install -U requests tqdm ipywidgets jupyterlab_widgets
+RUN python3 -m pip install -U requests ipywidgets jupyterlab_widgets
 
 # Impact Pack deps
 RUN python3 -m pip install piexif opencv-python-headless
